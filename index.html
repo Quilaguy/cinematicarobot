@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manipulador Esférico RRP · Control MQTT</title>
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#171d24; --line:#263140; --txt:#e6edf3; --mut:#8b98a8;
+    --acc:#f0a020; --ok:#3fb950; --bad:#f85149; --blue:#3b82f6;
+    --mono:"JetBrains Mono","Consolas",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.45 "Segoe UI",system-ui,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line)}
+  header h1{font-size:17px;margin:0;font-weight:600}
+  header .sub{color:var(--mut);font-size:12.5px}
+  #estadoCon{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mut)}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--bad)}
+  .dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  main{display:grid;grid-template-columns:330px 1fr 330px;gap:14px;padding:14px}
+  @media(max-width:1100px){main{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+  .card h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 12px;font-weight:600}
+  label{display:block;font-size:12px;color:var(--mut);margin:8px 0 4px}
+  input[type=text],input[type=password],input[type=number]{width:100%;background:#0d1117;border:1px solid var(--line);color:var(--txt);padding:7px 9px;border-radius:6px;font-family:var(--mono);font-size:12.5px}
+  input:focus{outline:1px solid var(--acc)}
+  .row{display:flex;gap:8px}.row>*{flex:1}
+  button{background:var(--acc);color:#111;border:0;border-radius:6px;padding:9px 12px;font-weight:600;cursor:pointer;width:100%;margin-top:12px}
+  button.sec{background:transparent;color:var(--txt);border:1px solid var(--line)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .chk{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);margin-top:8px}
+  .eje{display:grid;grid-template-columns:22px 1fr 78px;align-items:center;gap:8px;margin:10px 0}
+  .eje b{font-family:var(--mono);color:var(--acc)}
+  input[type=range]{width:100%;accent-color:var(--acc)}
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12.5px}
+  td{padding:5px 2px;border-bottom:1px solid var(--line)}
+  td:last-child{text-align:right}
+  .warn{color:var(--bad);font-size:12px;min-height:16px;margin-top:6px}
+  #vista{position:relative;align-self:start}
+  canvas{width:100%;height:560px;display:block;border-radius:10px;background:radial-gradient(circle at 50% 30%,#1c2530,#0d1117);cursor:grab}
+  .hint{position:absolute;left:14px;bottom:10px;font-size:11.5px;color:var(--mut)}
+  .eqs{font-family:var(--mono);font-size:12px;color:var(--mut);line-height:1.7}
+  #log{height:180px;overflow:auto;font-family:var(--mono);font-size:11.5px;color:var(--mut);background:#0d1117;border-radius:6px;padding:8px}
+  #log .in{color:#7ee787}#log .out{color:#79c0ff}#log .er{color:var(--bad)}
+  select{width:100%;background:#0d1117;border:1px solid var(--line);color:var(--txt);padding:7px;border-radius:6px}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Manipulador esférico RRP — Cinemática</h1>
+    <div class="sub">Tópicos Avanzados de Control · Laboratorio 4 · UMNG</div>
+  </div>
+  <div id="estadoCon"><span class="dot" id="dot"></span><span id="txtCon">Desconectado</span></div>
+</header>
+
+<main>
+  <!-- ============ Columna izquierda ============ -->
+  <section>
+    <div class="card">
+      <h2>Broker MQTT (HiveMQ Cloud)</h2>
+      <label>Host</label>
+      <input type="text" id="host" value="df77fd4698f4460badb095012d8c8a9c.s1.eu.hivemq.cloud">
+      <div class="row">
+        <div><label>Puerto WSS</label><input type="number" id="port" value="8884"></div>
+        <div><label>Ruta</label><input type="text" id="path" value="/mqtt"></div>
+      </div>
+      <label>Usuario</label><input type="text" id="user" autocomplete="username">
+      <label>Contraseña</label><input type="password" id="pass" autocomplete="current-password">
+      <div class="chk"><input type="checkbox" id="recordar"> Recordar en este navegador</div>
+      <button id="btnCon">Conectar</button>
+    </div>
+
+    <div class="card">
+      <h2>Tópicos</h2>
+      <label>Publicar objetivo</label><input type="text" id="topObj" value="umng/esferico/objetivo">
+      <label>Suscribir estado</label><input type="text" id="topEst" value="umng/esferico/estado">
+    </div>
+
+    <div class="card">
+      <h2>Parámetros del robot</h2>
+      <div class="row">
+        <div><label>h1 [m]</label><input type="number" id="h1" value="0.30" step="0.01"></div>
+        <div><label>d min</label><input type="number" id="dmin" value="0.15" step="0.01"></div>
+        <div><label>d max</label><input type="number" id="dmax" value="0.60" step="0.01"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Centro: vista 3D ============ -->
+  <section id="vista">
+    <canvas id="cv"></canvas>
+    <div class="hint">Arrastre para girar · rueda para zoom · rojo = efector · amarillo = objetivo</div>
+  </section>
+
+  <!-- ============ Columna derecha ============ -->
+  <section>
+    <div class="card">
+      <h2>Posición deseada del efector</h2>
+      <div class="eje"><b>x</b><input type="range" id="rx" min="-0.6" max="0.6" step="0.005"><input type="number" id="nx" step="0.01"></div>
+      <div class="eje"><b>y</b><input type="range" id="ry" min="-0.6" max="0.6" step="0.005"><input type="number" id="ny" step="0.01"></div>
+      <div class="eje"><b>z</b><input type="range" id="rz" min="-0.3" max="0.9" step="0.005"><input type="number" id="nz" step="0.01"></div>
+      <div class="warn" id="warn"></div>
+      <button id="btnEnviar" disabled>Enviar a Simulink</button>
+    </div>
+
+    <div class="card">
+      <h2>Cinemática inversa (calculada aquí)</h2>
+      <table>
+        <tr><td>q1 (base)</td><td id="iq1">–</td></tr>
+        <tr><td>q2 (hombro)</td><td id="iq2">–</td></tr>
+        <tr><td>d3 (brazo)</td><td id="id3">–</td></tr>
+      </table>
+      <div class="eqs" style="margin-top:10px">
+        q1 = atan2(y, x)<br>
+        q2 = atan2(z − h1, √(x²+y²))<br>
+        d3 = √(x²+y²+(z−h1)²)
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Respuesta de Simscape (MATLAB)</h2>
+      <table>
+        <tr><td>Posición medida</td><td id="rpos">–</td></tr>
+        <tr><td>Juntas [q1 q2 d3]</td><td id="rq">–</td></tr>
+        <tr><td>Error [ex ey ez]</td><td id="rerr">–</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section style="grid-column:1/-1">
+    <div class="card">
+      <h2>Registro MQTT</h2>
+      <div id="log"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const P = () => ({ h1:+$('h1').value, dmin:+$('dmin').value, dmax:+$('dmax').value });
+let objetivo = {x:0.30, y:0.20, z:0.45};
+let juntas   = {q1:0, q2:0, d3:0.3};     // estado animado mostrado
+let juntasObj= {...juntas};
+let cliente = null;
+
+/* ---------------- Cinemática ---------------- */
+function ik({x,y,z}, h1){
+  const r = Math.hypot(x,y);
+  return { q1: Math.atan2(y,x), q2: Math.atan2(z-h1, r), d3: Math.hypot(r, z-h1) };
+}
+function fk({q1,q2,d3}, h1){
+  return { x:d3*Math.cos(q2)*Math.cos(q1), y:d3*Math.cos(q2)*Math.sin(q1), z:h1+d3*Math.sin(q2) };
+}
+const deg = r => (r*180/Math.PI).toFixed(2)+'°';
+
+/* ---------------- Entradas ---------------- */
+function syncInputs(){
+  for (const k of ['x','y','z']){ $('r'+k).value = objetivo[k]; $('n'+k).value = objetivo[k].toFixed(3); }
+  actualizarIK();
+}
+for (const k of ['x','y','z']){
+  $('r'+k).addEventListener('input', e => { objetivo[k] = +e.target.value; $('n'+k).value = objetivo[k].toFixed(3); actualizarIK(); });
+  $('n'+k).addEventListener('change', e => { objetivo[k] = +e.target.value; $('r'+k).value = objetivo[k]; actualizarIK(); });
+}
+['h1','dmin','dmax'].forEach(id => $(id).addEventListener('change', actualizarIK));
+
+function actualizarIK(){
+  const p = P(), q = ik(objetivo, p.h1);
+  $('iq1').textContent = `${q.q1.toFixed(4)} rad  (${deg(q.q1)})`;
+  $('iq2').textContent = `${q.q2.toFixed(4)} rad  (${deg(q.q2)})`;
+  $('id3').textContent = `${q.d3.toFixed(4)} m`;
+  const fuera = q.d3 < p.dmin || q.d3 > p.dmax;
+  $('warn').textContent = fuera ? `Fuera del espacio de trabajo (d3 debe estar entre ${p.dmin} y ${p.dmax} m)` : '';
+  $('btnEnviar').disabled = fuera || !(cliente && cliente.connected);
+  juntasObj = q;
+  return !fuera;
+}
+
+/* ---------------- MQTT ---------------- */
+function log(msg, cls=''){
+  const t = new Date().toLocaleTimeString();
+  $('log').insertAdjacentHTML('afterbegin', `<div class="${cls}">[${t}] ${msg.replace(/</g,'&lt;')}</div>`);
+}
+function setCon(on, txt){
+  $('dot').classList.toggle('on', on);
+  $('txtCon').textContent = txt;
+  $('btnCon').textContent = on ? 'Desconectar' : 'Conectar';
+  actualizarIK();
+}
+try{
+  const g = JSON.parse(localStorage.getItem('esferico_mqtt')||'null');
+  if (g){ $('user').value=g.user||''; $('pass').value=g.pass||''; $('recordar').checked=true; }
+}catch(e){}
+
+$('btnCon').onclick = () => {
+  if (cliente && cliente.connected){ cliente.end(); return; }
+  const url = `wss://${$('host').value.trim()}:${$('port').value}${$('path').value}`;
+  try{
+    if ($('recordar').checked) localStorage.setItem('esferico_mqtt', JSON.stringify({user:$('user').value, pass:$('pass').value}));
+    else localStorage.removeItem('esferico_mqtt');
+  }catch(e){}
+  setCon(false, 'Conectando…');
+  cliente = mqtt.connect(url, {
+    username: $('user').value, password: $('pass').value,
+    clientId: 'web_esferico_' + Math.random().toString(16).slice(2,10),
+    clean: true, connectTimeout: 8000, reconnectPeriod: 4000, protocolVersion: 4
+  });
+  cliente.on('connect', () => {
+    setCon(true, 'Conectado');
+    log('Conectado a ' + url);
+    cliente.subscribe($('topEst').value, err => log(err ? 'Error al suscribir: '+err.message : 'Suscrito a ' + $('topEst').value, err?'er':''));
+  });
+  cliente.on('reconnect', () => setCon(false, 'Reconectando…'));
+  cliente.on('close',     () => setCon(false, 'Desconectado'));
+  cliente.on('error', e => { log('Error: ' + e.message, 'er'); });
+  cliente.on('message', (topic, payload) => {
+    const s = payload.toString();
+    log(`← ${topic}: ${s}`, 'in');
+    try{
+      const m = JSON.parse(s);
+      if (m.error){ $('rpos').textContent = m.error; return; }
+      if ('x' in m){
+        $('rpos').textContent = `[${m.x.toFixed(4)}, ${m.y.toFixed(4)}, ${m.z.toFixed(4)}]`;
+        $('rq').textContent   = `[${m.q1.toFixed(3)}, ${m.q2.toFixed(3)}, ${m.d3.toFixed(3)}]`;
+        $('rerr').textContent = `[${m.ex.toExponential(1)}, ${m.ey.toExponential(1)}, ${m.ez.toExponential(1)}]`;
+        juntasObj = {q1:m.q1, q2:m.q2, d3:m.d3};
+      }
+    }catch(e){}
+  });
+};
+
+$('btnEnviar').onclick = () => {
+  if (!actualizarIK() || !cliente?.connected) return;
+  const q = ik(objetivo, P().h1);
+  const msg = JSON.stringify({ x:objetivo.x, y:objetivo.y, z:objetivo.z, q1:q.q1, q2:q.q2, d3:q.d3, t:Date.now() });
+  cliente.publish($('topObj').value, msg, {qos:1});
+  log(`→ ${$('topObj').value}: ${msg}`, 'out');
+};
+
+/* ---------------- Vista 3D (proyección propia) ---------------- */
+const cv = $('cv'), ctx = cv.getContext('2d');
+let yaw = -0.7, pitch = 0.45, zoom = 520, drag = null;
+cv.addEventListener('mousedown', e => drag = {x:e.clientX, y:e.clientY, yaw, pitch});
+addEventListener('mouseup', () => drag = null);
+addEventListener('mousemove', e => { if (!drag) return;
+  yaw = drag.yaw + (e.clientX-drag.x)*0.01;
+  pitch = Math.max(-0.2, Math.min(1.4, drag.pitch + (e.clientY-drag.y)*0.01)); });
+cv.addEventListener('wheel', e => { e.preventDefault(); zoom = Math.max(200, Math.min(1400, zoom*(e.deltaY>0?0.92:1.08))); }, {passive:false});
+
+function proj([x,y,z]){
+  const W = cv.width, H = cv.height;
+  const cy=Math.cos(yaw), sy=Math.sin(yaw), cp=Math.cos(pitch), sp=Math.sin(pitch);
+  const X = x*cy - y*sy, Y = x*sy + y*cy;           // giro en Z
+  const Yv = Y*cp - (z-0.25)*sp*-1;                 // inclinación
+  const Zv = (z-0.25)*cp + Y*sp;
+  return [W/2 + X*zoom*devicePixelRatio, H*0.62 - Zv*zoom*devicePixelRatio, Yv];
+}
+function linea(a,b,col,w){ const p=proj(a), q=proj(b); ctx.strokeStyle=col; ctx.lineWidth=w*devicePixelRatio; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(p[0],p[1]); ctx.lineTo(q[0],q[1]); ctx.stroke(); }
+function punto(a,r,col){ const p=proj(a); ctx.fillStyle=col; ctx.beginPath(); ctx.arc(p[0],p[1],r*devicePixelRatio,0,7); ctx.fill(); }
+function poly(pts,fill,stroke){ ctx.beginPath(); pts.map(proj).forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.closePath(); ctx.fillStyle=fill; ctx.fill(); if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=devicePixelRatio;ctx.stroke();} }
+
+function dibujar(){
+  const r = cv.getBoundingClientRect();
+  if (cv.width !== r.width*devicePixelRatio){ cv.width = r.width*devicePixelRatio; cv.height = r.height*devicePixelRatio; }
+  ctx.clearRect(0,0,cv.width,cv.height);
+  const {h1, dmin} = P();
+
+  // animación suave hacia las juntas objetivo
+  const a = 0.12;
+  let dq1 = juntasObj.q1 - juntas.q1; dq1 = Math.atan2(Math.sin(dq1), Math.cos(dq1));
+  juntas.q1 += a*dq1; juntas.q2 += a*(juntasObj.q2-juntas.q2); juntas.d3 += a*(juntasObj.d3-juntas.d3);
+
+  // rejilla del piso
+  for (let i=-6;i<=6;i++){ linea([i*0.1,-0.6,0],[i*0.1,0.6,0],'#1f2a36',1); linea([-0.6,i*0.1,0],[0.6,i*0.1,0],'#1f2a36',1); }
+  // ejes
+  linea([0,0,0],[0.15,0,0],'#f85149',2); linea([0,0,0],[0,0.15,0],'#3fb950',2); linea([0,0,0],[0,0,0.15],'#3b82f6',2);
+  // base
+  poly([[-0.2,-0.2,0],[0.2,-0.2,0],[0.2,0.2,0],[-0.2,0.2,0]], 'rgba(120,130,145,.35)', '#56606e');
+  // columna (gira con q1)
+  linea([0,0,0],[0,0,h1],'#3b82f6',14);
+  const {q1,q2,d3} = juntas;
+  const u = [Math.cos(q2)*Math.cos(q1), Math.cos(q2)*Math.sin(q1), Math.sin(q2)];  // dirección del brazo
+  const S = [0,0,h1];
+  const at = d => [S[0]+u[0]*d, S[1]+u[1]*d, S[2]+u[2]*d];
+  // vástago (gris), camisa (naranja), hombro
+  linea(at(d3-0.6), at(d3), '#c9d1d9', 7);
+  linea(at(-0.04), at(dmin), '#f0a020', 14);
+  punto(S, 9, '#f0a020');
+  // objetivo
+  const o = objetivo;
+  linea([o.x,o.y,0],[o.x,o.y,o.z],'rgba(240,200,60,.35)',1);
+  punto([o.x,o.y,o.z], 6, '#f0c83c');
+  // efector
+  const e = fk(juntas, h1);
+  punto([e.x,e.y,e.z], 8, '#f85149');
+  // texto
+  ctx.fillStyle='#8b98a8'; ctx.font=`${12*devicePixelRatio}px Consolas,monospace`;
+  ctx.fillText(`efector: [${e.x.toFixed(3)}, ${e.y.toFixed(3)}, ${e.z.toFixed(3)}] m`, 14*devicePixelRatio, 22*devicePixelRatio);
+  ctx.fillText(`q1=${deg(q1)}  q2=${deg(q2)}  d3=${d3.toFixed(3)} m`, 14*devicePixelRatio, 40*devicePixelRatio);
+  requestAnimationFrame(dibujar);
+}
+
+syncInputs();
+juntas = {...juntasObj};
+dibujar();
+</script>
+</body>
+</html>
