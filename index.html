@@ -45,6 +45,11 @@
   #log{height:180px;overflow:auto;font-family:var(--mono);font-size:11.5px;color:var(--mut);background:#0d1117;border-radius:6px;padding:8px}
   #log .in{color:#7ee787}#log .out{color:#79c0ff}#log .er{color:var(--bad)}
   select{width:100%;background:#0d1117;border:1px solid var(--line);color:var(--txt);padding:7px;border-radius:6px}
+  .mat{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 10px;font-family:var(--mono);font-size:12px;padding:8px 12px;border-left:2px solid var(--mut);border-right:2px solid var(--mut);border-radius:4px}
+  .mat span{text-align:right}
+  .barra{height:6px;background:#0d1117;border-radius:3px;margin-top:10px;overflow:hidden}
+  .barra div{height:100%;width:0;background:var(--ok);transition:width .15s,background .15s}
+  .sing{font-size:12px;margin-top:6px;color:var(--mut)}
 </style>
 </head>
 <body>
@@ -121,11 +126,24 @@
     </div>
 
     <div class="card">
+      <h2>Jacobiano J(q)</h2>
+      <div class="mat" id="matJ"></div>
+      <table style="margin-top:8px">
+        <tr><td>det J = d3²·cos q2</td><td id="detJ">–</td></tr>
+      </table>
+      <div class="barra"><div id="barSing"></div></div>
+      <div class="sing" id="txtSing">–</div>
+    </div>
+
+    <div class="card">
       <h2>Respuesta de Simscape (MATLAB)</h2>
       <table>
         <tr><td>Posición medida</td><td id="rpos">–</td></tr>
         <tr><td>Juntas [q1 q2 d3]</td><td id="rq">–</td></tr>
         <tr><td>Error [ex ey ez]</td><td id="rerr">–</td></tr>
+        <tr><td>det J final</td><td id="rdet">–</td></tr>
+        <tr><td>Vel. máx. efector</td><td id="rvmax">–</td></tr>
+        <tr><td>|v Simscape − J·q̇|</td><td id="rerrJ">–</td></tr>
       </table>
     </div>
   </section>
@@ -155,6 +173,25 @@ function fk({q1,q2,d3}, h1){
   return { x:d3*Math.cos(q2)*Math.cos(q1), y:d3*Math.cos(q2)*Math.sin(q1), z:h1+d3*Math.sin(q2) };
 }
 const deg = r => (r*180/Math.PI).toFixed(2)+'°';
+function jacobiano({q1,q2,d3}){
+  const c1=Math.cos(q1), s1=Math.sin(q1), c2=Math.cos(q2), s2=Math.sin(q2);
+  return [[-d3*c2*s1, -d3*s2*c1, c2*c1],
+          [ d3*c2*c1, -d3*s2*s1, c2*s1],
+          [ 0,         d3*c2,    s2   ]];
+}
+function mostrarJ(q){
+  const J = jacobiano(q), det = q.d3*q.d3*Math.cos(q.q2);
+  $('matJ').innerHTML = J.flat().map(v => `<span>${(Math.abs(v)<5e-5?0:v).toFixed(3)}</span>`).join('');
+  $('detJ').textContent = det.toFixed(4);
+  // cercanía a singularidad: |cos q2| (brazo vertical) y d3 (efector en el hombro)
+  const idx = Math.min(Math.abs(Math.cos(q.q2)), q.d3/0.15);
+  const b = $('barSing');
+  b.style.width = (100*Math.min(1, idx)).toFixed(0) + '%';
+  b.style.background = idx < 0.15 ? 'var(--bad)' : idx < 0.4 ? 'var(--acc)' : 'var(--ok)';
+  $('txtSing').textContent = idx < 0.15 ? 'Cerca de singularidad: brazo casi vertical (q2 ≈ ±90°)'
+                         : idx < 0.4 ? 'Destreza reducida' : 'Lejos de singularidades';
+  $('txtSing').style.color = idx < 0.15 ? 'var(--bad)' : 'var(--mut)';
+}
 
 /* ---------------- Entradas ---------------- */
 function syncInputs(){
@@ -226,6 +263,11 @@ $('btnCon').onclick = () => {
         $('rpos').textContent = `[${m.x.toFixed(4)}, ${m.y.toFixed(4)}, ${m.z.toFixed(4)}]`;
         $('rq').textContent   = `[${m.q1.toFixed(3)}, ${m.q2.toFixed(3)}, ${m.d3.toFixed(3)}]`;
         $('rerr').textContent = `[${m.ex.toExponential(1)}, ${m.ey.toExponential(1)}, ${m.ez.toExponential(1)}]`;
+        if ('detJ' in m){
+          $('rdet').textContent  = m.detJ.toFixed(4);
+          $('rvmax').textContent = m.vmax.toFixed(3) + ' m/s';
+          $('rerrJ').textContent = m.errJ.toExponential(1) + ' m/s';
+        }
         juntasObj = {q1:m.q1, q2:m.q2, d3:m.d3};
       }
     }catch(e){}
@@ -300,6 +342,7 @@ function dibujar(){
   ctx.fillStyle='#8b98a8'; ctx.font=`${12*devicePixelRatio}px Consolas,monospace`;
   ctx.fillText(`efector: [${e.x.toFixed(3)}, ${e.y.toFixed(3)}, ${e.z.toFixed(3)}] m`, 14*devicePixelRatio, 22*devicePixelRatio);
   ctx.fillText(`q1=${deg(q1)}  q2=${deg(q2)}  d3=${d3.toFixed(3)} m`, 14*devicePixelRatio, 40*devicePixelRatio);
+  mostrarJ(juntas);
   requestAnimationFrame(dibujar);
 }
 
